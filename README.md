@@ -26,9 +26,7 @@ A hyper-stylized, classified-themed, offensive-security code editor built purely
 
 | FBI Terminal                | CIA BlackOps                  | NSA Quantum                   |
 |-----------------------------|-------------------------------|-------------------------------|
-| ![FBI](https://via.placeholder.com/800x500/000000/00ff41?text=FBI+Terminal) | ![CIA](https://via.placeholder.com/800x500/001122/00ffff?text=CIA+BlackOps) | ![NSA](https://via.placeholder.com/800x500/0a001f/ff00ff?text=NSA+Quantum) |
-
-(Replace the placeholder links with your actual screenshots once uploaded)
+| ![FBI]([https://via.placeholder.com/800x500/000000/00ff41?text=FBI+Terminal](https://external-content.duckduckgo.com/iu/?u=https%3A%2F%2Ftse2.mm.bing.net%2Fth%2Fid%2FOIP.jUWmA3qSr4YzWGRbjAabCAHaEK%3Fpid%3DApi&f=1&ipt=a26b36294dd24d6d2011dead45d9d64621f8fd0423c2fe9626625bd562c0cc77&ipo=images)) | ![CIA]([https://via.placeholder.com/800x500/001122/00ffff?text=CIA+BlackOps](https://external-content.duckduckgo.com/iu/?u=https%3A%2F%2Ftse1.mm.bing.net%2Fth%2Fid%2FOIP.FGUjgbuN9oK1PjPnuveJ6AHaD8%3Fpid%3DApi&f=1&ipt=a2c75483b7d0aa66109cc99b339529ee19bcf8141b1ff143342d89d39718841d&ipo=images)) | ![NSA]([https://via.placeholder.com/800x500/0a001f/ff00ff?text=NSA+Quantum](https://external-content.duckduckgo.com/iu/?u=https%3A%2F%2Ftse3.mm.bing.net%2Fth%2Fid%2FOIP.s1vAORX1BM1SKN0oqrLp9gHaEK%3Fpid%3DApi&f=1&ipt=451042b2848605e6494e638b6d75b8fad974d45d83e1d628cdb2360eb8d4a4af&ipo=images)) |
 
 ### Requirements
 
