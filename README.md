@@ -1,4 +1,4 @@
-# LEVIATHAN EDIT v6 — TOP SECRET // NOFORN PENTEST COMMAND CENTER
+# LEVIATHAN EDIT v7 — TOP SECRET // NOFORN PENTEST COMMAND CENTER
 
 <img src="https://raw.githubusercontent.com/Railgun1337/leviathan-edit/main/screenshot.png" alt="LEVIATHAN EDIT in FBI Terminal theme" width="100%"/>
 
@@ -30,6 +30,9 @@ A hyper-stylized, classified-themed, offensive-security code editor built purely
 | ![FBI] <img width="2393" height="1292" alt="Screenshot 2025-12-04 201922" src="https://github.com/user-attachments/assets/eee4ccaa-a1ef-4698-bb6b-2c26820a4503" /> | ![CIA] <img width="402" height="465" alt="Screenshot 2025-12-04 201950" src="https://github.com/user-attachments/assets/3c41ba44-93ee-4593-be18-84ede1a89a38" />
 | ![NSA] <img width="1002" height="790" alt="Screenshot 2025-12-04 202008" src="https://github.com/user-attachments/assets/e1412012-9188-47f8-af03-eced627173d4" />
  |
+
+
+ BUG LOG: V7 Fixes and issue previous versions had when attempting to run any code that required user input. Please continue reporting bugs as I greatly appreciate it<3!
 
 ### Requirements
 
