@@ -1,6 +1,6 @@
 # leviathan_edit.pyw
 # LEVIATHAN EDIT v3.0 - PYQT6 POWERED ULTIMATE EDITION
-# FIXED: Added missing imports and removed current line highlight
+# FIXED: Input handling and crash fixes
 
 import sys
 from PyQt6.QtWidgets import (
@@ -12,10 +12,10 @@ from PyQt6.QtWidgets import (
     QPlainTextEdit, QAbstractScrollArea, QCheckBox
 )
 from PyQt6.QtGui import (
-    QFont, QTextCursor, QTextCharFormat, QColor, QPalette,
-    QAction, QIcon, QPixmap, QTextFormat, QPainter,
-    QSyntaxHighlighter, QFontMetrics, QKeySequence, QContextMenuEvent,
-    QPaintEvent, QResizeEvent, QTextBlock, QTextDocument, QBrush
+    QFont, QTextCursor, QTextCharFormat, QColor, QPalette, QAction, 
+    QIcon, QPixmap, QTextFormat, QPainter, QSyntaxHighlighter, 
+    QFontMetrics, QKeySequence, QContextMenuEvent, QPaintEvent, 
+    QResizeEvent, QTextBlock, QTextDocument, QBrush
 )
 from PyQt6.QtCore import (
     Qt, QSize, QRegularExpression, pyqtSignal, QTimer,
@@ -30,6 +30,9 @@ from datetime import datetime
 import hashlib
 import signal
 import select
+import subprocess
+import threading
+import time
 
 # Import for syntax highlighting
 from pygments import highlight
@@ -46,6 +49,7 @@ class ProcessWorker(QObject):
     output_received = pyqtSignal(str, bool)  # text, is_error
     input_prompt = pyqtSignal(str)
     finished = pyqtSignal()
+    process_started = pyqtSignal()
     
     def __init__(self, command, temp_file_path):
         super().__init__()
@@ -57,14 +61,9 @@ class ProcessWorker(QObject):
         self.stderr_buffer = ""
         
     def run(self):
-        import subprocess
-        import threading
-        import time
-        
         try:
             # Use Popen with -u flag for Python to force unbuffered output
             if "python" in self.command.lower():
-                # Add -u flag for unbuffered output
                 self.command = self.command.replace('python ', 'python -u ')
                 self.command = self.command.replace('"python" ', '"python" -u ')
             
@@ -75,10 +74,12 @@ class ProcessWorker(QObject):
                 stdin=subprocess.PIPE,
                 shell=True,
                 text=True,
-                bufsize=1,  # Line buffered
+                bufsize=0,  # CHANGED: Completely unbuffered
                 universal_newlines=True,
                 creationflags=subprocess.CREATE_NEW_PROCESS_GROUP if sys.platform == "win32" else 0
             )
+            
+            self.process_started.emit()
             
             # Start threads to read stdout and stderr
             stdout_thread = threading.Thread(target=self.read_stdout, daemon=True)
@@ -89,9 +90,9 @@ class ProcessWorker(QObject):
             
             # Wait for process to complete
             while not self.process_finished and self.process.poll() is None:
-                time.sleep(0.1)
+                time.sleep(0.05)
             
-            # Wait a bit for threads to finish reading remaining output
+            # Wait for threads to finish reading
             stdout_thread.join(timeout=2)
             stderr_thread.join(timeout=2)
             
@@ -106,121 +107,95 @@ class ProcessWorker(QObject):
         finally:
             # Clean up temp file
             try:
-                import os
-                os.remove(self.temp_file_path)
+                if os.path.exists(self.temp_file_path):
+                    os.remove(self.temp_file_path)
             except:
                 pass
             
             self.finished.emit()
     
     def read_stdout(self):
-        import time
-        import sys
+        """FIXED: Read character by character to catch prompts immediately"""
         try:
-            # Read directly from the pipe
-            import select
-            
-            while self.process and self.process.poll() is None:
+            while self.process and self.process.poll() is None and not self.process_finished:
                 try:
-                    # Try to read available data
-                    if sys.platform == "win32":
-                        # Windows: use a different approach
-                        import msvcrt
-                        import io
+                    # Read one character at a time
+                    char = self.process.stdout.read(1)
+                    
+                    if char:
+                        self.stdout_buffer += char
                         
-                        # Try to read a chunk of data
-                        try:
-                            data = self.process.stdout.read(1024)
-                            if data:
-                                self.stdout_buffer += data
+                        # Emit character immediately so it shows in real-time
+                        self.output_received.emit(char, False)
+                        
+                        # Check if buffer ends with common input indicators
+                        # This catches prompts that don't end with newline
+                        buffer_end = self.stdout_buffer[-50:].strip().lower() if len(self.stdout_buffer) > 0 else ""
+                        
+                        # Detect input prompts (no newline needed!)
+                        prompt_indicators = [
+                            ':', '?', '>', 
+                            'input', 'enter', 'name', 'password', 'age',
+                            'please', 'type', 'choose', 'select'
+                        ]
+                        
+                        # If we see these patterns, emit input prompt
+                        for indicator in prompt_indicators:
+                            if indicator in buffer_end and len(buffer_end) > 0:
+                                # Wait a tiny bit to see if more text comes
+                                time.sleep(0.05)
                                 
-                                # Check for newlines to flush
-                                if '\n' in data or '\r' in data or len(self.stdout_buffer) >= 100:
-                                    # Split by lines and process each
-                                    lines = self.stdout_buffer.splitlines(keepends=True)
-                                    for line in lines:
-                                        if line.strip():
-                                            self.output_received.emit(line, False)
-                                            
-                                            # Check for input prompts
-                                            line_lower = line.lower()
-                                            prompt_indicators = [':', '?', 'input', 'enter', '>>', '>>>', 'name', 'password', 'age']
-                                            if any(indicator in line_lower for indicator in prompt_indicators):
-                                                self.input_prompt.emit(line.strip())
-                                    
-                                    self.stdout_buffer = ""
-                        except:
-                            pass
+                                # If no more output, this is likely a prompt
+                                if self.process.poll() is None:
+                                    # Get last line as prompt
+                                    last_line = self.stdout_buffer.split('\n')[-1].strip()
+                                    if len(last_line) > 0:
+                                        self.input_prompt.emit(last_line)
+                                        break
                     else:
-                        # Unix/Linux/Mac: use select
-                        import select
-                        if select.select([self.process.stdout], [], [], 0.1)[0]:
-                            data = self.process.stdout.read(1)
-                            if data:
-                                self.stdout_buffer += data
-                                
-                                # Check for newline to flush
-                                if data in ['\n', '\r'] or len(self.stdout_buffer) >= 100:
-                                    if self.stdout_buffer.strip():
-                                        self.output_received.emit(self.stdout_buffer, False)
-                                        
-                                        # Check for input prompts
-                                        buffer_lower = self.stdout_buffer.lower()
-                                        prompt_indicators = [':', '?', 'input', 'enter', '>>', '>>>', 'name', 'password', 'age']
-                                        if any(indicator in buffer_lower for indicator in prompt_indicators):
-                                            self.input_prompt.emit(self.stdout_buffer.strip())
-                                    
-                                    self.stdout_buffer = ""
+                        # No data available
+                        time.sleep(0.01)
+                        
+                except Exception:
+                    break
                     
-                    time.sleep(0.01)
-                    
-                except Exception as e:
-                    # If read fails, continue
-                    pass
-                    
-        except Exception as e:
-            # Flush any remaining buffer
+        except Exception:
             if self.stdout_buffer:
                 self.output_received.emit(self.stdout_buffer, False)
-            pass
     
     def read_stderr(self):
-        import time
+        """Read stderr character by character"""
         try:
-            while self.process and self.process.poll() is None:
-                # Read character by character
-                char = self.process.stderr.read(1)
-                if char:
-                    self.stderr_buffer += char
-                    
-                    # Check for newline or carriage return to flush buffer
-                    if char in ['\n', '\r'] or len(self.stderr_buffer) >= 100:
-                        if self.stderr_buffer.strip():
-                            self.output_received.emit(self.stderr_buffer, True)
-                        self.stderr_buffer = ""
-                else:
-                    # No data, short sleep
-                    time.sleep(0.01)
-                    
-        except Exception as e:
-            # Flush any remaining buffer
+            while self.process and self.process.poll() is None and not self.process_finished:
+                try:
+                    char = self.process.stderr.read(1)
+                    if char:
+                        self.output_received.emit(char, True)
+                    else:
+                        time.sleep(0.01)
+                except Exception:
+                    pass
+        except Exception:
             if self.stderr_buffer:
                 self.output_received.emit(self.stderr_buffer, True)
-            pass
     
     def send_input(self, text):
-        if self.process and self.process.poll() is None:
+        """Send input to the process"""
+        if self.process and self.process.poll() is None and not self.process_finished:
             try:
                 self.process.stdin.write(text + "\n")
                 self.process.stdin.flush()
-            except:
-                pass
+                return True
+            except Exception as e:
+                self.output_received.emit(f"Input error: {str(e)}\n", True)
+                return False
+        return False
     
     def stop(self):
+        """Stop the process gracefully"""
         self.process_finished = True
         if self.process and self.process.poll() is None:
             try:
-                import signal
                 if sys.platform == "win32":
                     self.process.terminate()
                 else:
@@ -874,6 +849,11 @@ class LeviathanEditUltimate(QMainWindow):
         # Custom templates
         self.custom_templates = self.load_custom_templates()
         
+        # Process management
+        self.process_worker = None
+        self.process_thread = None
+        self.stop_button = None
+        
         # Create UI
         self.create_ui()
         
@@ -933,18 +913,38 @@ subprocess.call(["/bin/sh", "-i"])
         self.autocomplete_popup.hide()
 
     def send_input_to_process(self):
-        """Send input from the input line to the running process"""
-        if not hasattr(self, 'current_process') or not self.current_process:
+        """FIXED: Send input from the input line to the running process"""
+        # Check if process exists and is running
+        if not hasattr(self, 'process_worker') or self.process_worker is None:
+            self.output_console.appendPlainText("\n✗ ERROR: No process is running")
             return
-    
-        text = self.input_line.text() + "\n"
+        
+        # Check if process is still alive
+        if hasattr(self.process_worker, 'process') and self.process_worker.process:
+            if self.process_worker.process.poll() is not None:
+                self.output_console.appendPlainText("\n✗ ERROR: Process has already finished")
+                self.cleanup_after_process()
+                return
+        
+        text = self.input_line.text()
+        if not text.strip():
+            return
+        
         self.input_line.clear()
+        
+        # Echo the input to output console
+        self.output_console.appendPlainText(f"{text}")
+        
+        # Send to the process worker
+        success = self.process_worker.send_input(text)
+        if not success:
+            self.output_console.appendPlainText("✗ ERROR: Failed to send input to process")
+            self.cleanup_after_process()
     
-        try:
-            self.current_process.stdin.write(text)
-            self.current_process.stdin.flush()
-        except:
-            pass
+    def clear_console_now(self):
+        """Manual console clear button"""
+        self.output_console.clear()
+        self.status_bar.showMessage("CONSOLE CLEARED")
 
     def show_input_prompt(self, prompt=""):
         """Show the input console with a prompt"""
@@ -1074,6 +1074,12 @@ subprocess.call(["/bin/sh", "-i"])
         main_layout = QHBoxLayout(central)
         main_layout.setContentsMargins(0, 0, 0, 0)
         main_layout.setSpacing(0)
+        
+        clear_shortcut = QKeySequence("Ctrl+L")
+        clear_action = QAction("Clear Console", self)
+        clear_action.setShortcut(clear_shortcut)
+        clear_action.triggered.connect(self.clear_console_now)
+        self.addAction(clear_action)
 
         #################################################################
         #  SCROLLABLE SIDEBAR  (fixes disappearing buttons)
@@ -1777,6 +1783,10 @@ subprocess.call(["/bin/sh", "-i"])
             QMessageBox.warning(self, "EMPTY FILE", "There is no code to run.")
             return
 
+        # Clean up any existing process
+        if self.process_worker:
+            self.cleanup_after_process()
+
         import tempfile
         import os
 
@@ -1828,29 +1838,29 @@ subprocess.call(["/bin/sh", "-i"])
         self.status_bar.showMessage("RUNNING... (Interactive Mode - Use Input Box Below)")
     
         # Show the input console
-        if hasattr(self, 'input_frame'):
-            self.input_frame.show()
-            self.input_line.clear()
-            self.input_line.setFocus()
+        self.input_frame.show()
+        self.input_line.clear()
+        self.input_line.setFocus()
     
-        # Create a STOP button
-        self.stop_button = QPushButton("STOP EXECUTION")
-        self.stop_button.setStyleSheet("""
-            QPushButton {
-                background: #ff0000;
-                color: white;
-                font-weight: bold;
-                border: 2px solid #ff4444;
-                border-radius: 4px;
-                padding: 5px;
-                margin-right: 10px;
-            }
-            QPushButton:hover {
-                background: #ff4444;
-            }
-        """)
-        self.stop_button.clicked.connect(self.stop_current_process)
-        self.status_bar.addPermanentWidget(self.stop_button)
+        # Create a STOP button if not already exists
+        if not self.stop_button:
+            self.stop_button = QPushButton("STOP EXECUTION")
+            self.stop_button.setStyleSheet("""
+                QPushButton {
+                    background: #ff0000;
+                    color: white;
+                    font-weight: bold;
+                    border: 2px solid #ff4444;
+                    border-radius: 4px;
+                    padding: 5px;
+                    margin-right: 10px;
+                }
+                QPushButton:hover {
+                    background: #ff4444;
+                }
+            """)
+            self.stop_button.clicked.connect(self.stop_current_process)
+            self.status_bar.addPermanentWidget(self.stop_button)
     
         # Clear output console
         self.output_console.clear()
@@ -1861,92 +1871,126 @@ subprocess.call(["/bin/sh", "-i"])
         self.process_worker = ProcessWorker(command, temp_path)
         self.process_worker.output_received.connect(self.handle_output)
         self.process_worker.input_prompt.connect(self.handle_input_prompt)
+        self.process_worker.process_started.connect(self.handle_process_started)  # NEW
         self.process_worker.finished.connect(self.handle_process_finished)
     
         # Start worker in a thread
         self.process_thread = QThread()
         self.process_worker.moveToThread(self.process_thread)
         self.process_thread.started.connect(self.process_worker.run)
-        self.process_thread.finished.connect(self.cleanup_thread)  # Add this line
+        self.process_thread.finished.connect(self.cleanup_thread)
         self.process_thread.start()
 
+    def handle_process_started(self):
+        """Called when the process actually starts"""
+        self.status_bar.showMessage("RUNNING... Process started successfully")
+
+
     def stop_current_process(self):
-        """Stop the currently running process"""
-        if hasattr(self, 'process_worker') and self.process_worker:
-            self.process_worker.stop()
-            self.output_console.appendPlainText("\n=== PROCESS STOPPED BY USER ===")
-            
-            # Clean up
-            self.cleanup_after_process()
+        """FIXED: Stop the currently running process without crashing"""
+        # Check if process exists
+        if not hasattr(self, 'process_worker') or self.process_worker is None:
+            self.output_console.appendPlainText("\n=== NO PROCESS RUNNING ===")
+            return
+        
+        # Stop the process
+        self.process_worker.stop()
+        self.output_console.appendPlainText("\n=== PROCESS STOPPED BY USER ===")
+        
+        # Force cleanup immediately
+        self.cleanup_after_process()
+
             
     def cleanup_thread(self):
         """Clean up the thread object"""
         if hasattr(self, 'process_thread'):
             try:
+                self.process_thread.quit()
+                self.process_thread.wait(500)  # Wait up to 0.5 second
                 self.process_thread.deleteLater()
                 self.process_thread = None
             except:
                 pass
+            finally:
+                self.process_thread = None
             
     def cleanup_after_process(self):
-        """Clean up after process finishes"""
+        """FIXED: Clean up after process finishes"""
         # Hide input frame
         if hasattr(self, 'input_frame'):
             self.input_frame.hide()
         
-        # Remove stop button
-        if hasattr(self, 'stop_button'):
+        # Remove and delete stop button safely
+        if hasattr(self, 'stop_button') and self.stop_button is not None:
             try:
                 self.status_bar.removeWidget(self.stop_button)
                 self.stop_button.deleteLater()
+            except RuntimeError:
+                # Widget already deleted
+                pass
+            finally:
                 self.stop_button = None
-            except:
-                pass
         
-        # Clean up worker and thread
-        if hasattr(self, 'process_thread'):
+        # Clean up thread
+        if hasattr(self, 'process_thread') and self.process_thread is not None:
             try:
-                self.process_thread.quit()
-                self.process_thread.wait(1000)  # Wait up to 1 second
+                if self.process_thread.isRunning():
+                    self.process_thread.quit()
+                    self.process_thread.wait(1000)
                 self.process_thread.deleteLater()
-                self.process_thread = None
-            except:
+            except RuntimeError:
                 pass
+            finally:
+                self.process_thread = None
         
         # Reset worker
         self.process_worker = None
-        self.temp_file_path = None
-
+        
+        # Update status
+        self.status_bar.showMessage("READY")
 
     def handle_output(self, text, is_error):
-        if is_error:
-            self.output_console.appendPlainText(f"ERROR: {text.rstrip()}")
-        else:
-            self.output_console.appendPlainText(text.rstrip())
+        if text.strip():  # Only append non-empty lines
+            if is_error:
+                self.output_console.appendPlainText(f"ERROR: {text.rstrip()}")
+            else:
+                self.output_console.appendPlainText(text.rstrip())
 
     def handle_input_prompt(self, prompt):
-        """Handle input prompts from the program"""
-        # Always show prompts immediately in the output console
+        """FIXED: Handle input prompts - show ALL prompts immediately"""
+        # Always show the prompt in output console
         if prompt and prompt.strip():
-            self.output_console.appendPlainText(prompt)
-        
-        # Set placeholder and focus on input line
-        if hasattr(self, 'input_line'):
-            # Clean up the prompt for placeholder
-            clean_prompt = prompt.strip()
-            if len(clean_prompt) > 30:
-                clean_prompt = clean_prompt[:27] + "..."
+            # Don't duplicate if it's already the last line
+            current_text = self.output_console.toPlainText()
+            last_line = current_text.split('\n')[-1].strip()
             
-            self.input_line.setPlaceholderText(f"Respond to: {clean_prompt}")
+            if last_line != prompt.strip():
+                # Only add if it's new
+                pass  # Already emitted by read_stdout
+        
+        # Make input box visible and ready
+        if hasattr(self, 'input_frame'):
+            self.input_frame.show()
+        
+        if hasattr(self, 'input_line'):
+            # Set placeholder
+            clean_prompt = prompt.strip()
+            if len(clean_prompt) > 40:
+                clean_prompt = clean_prompt[:37] + "..."
+            
+            self.input_line.setPlaceholderText(f"→ {clean_prompt}")
             self.input_line.setFocus()
             
             # Update status bar
-            self.status_bar.showMessage(f"WAITING FOR INPUT: {prompt[:50]}...")
+            self.status_bar.showMessage(f"⚠ INPUT REQUIRED: {prompt[:60]}")
             
     def handle_process_finished(self):
-        """Called when the process finishes"""
-        # Use QTimer to ensure UI updates happen in the main thread
-        QTimer.singleShot(100, self.finalize_process)
+        """FIXED: Called when the process finishes"""
+        self.output_console.appendPlainText("\n=== EXECUTION COMPLETE ===")
+        self.status_bar.showMessage("EXECUTION COMPLETE")
+        
+        # Clean up immediately (no timer needed)
+        self.cleanup_after_process()
     
     def finalize_process(self):
         """Final cleanup after process finishes"""
@@ -1956,174 +2000,6 @@ subprocess.call(["/bin/sh", "-i"])
         # Clean up
         self.cleanup_after_process()
     
-        # Function to run the process in a separate thread
-        def run_process():
-            stdout_parts = []
-            stderr_parts = []
-        
-            try:
-                # Use Popen with proper pipes for interactive I/O
-                self.current_process = subprocess.Popen(
-                    command,
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.PIPE,
-                    stdin=subprocess.PIPE,
-                    shell=True,
-                    text=True,
-                    bufsize=1,  # Line buffered
-                    universal_newlines=True,
-                    start_new_session=True
-                )
-            
-                # Function to read output from a stream
-                def read_stream(stream, is_stderr=False):
-                    try:
-                        while not self.process_finished and self.current_process and self.current_process.poll() is None:
-                            try:
-                                # Try to read a line (non-blocking with short timeout)
-                                line = stream.readline()
-                                if line:
-                                    # Update console in real-time
-                                    if is_stderr:
-                                        display_line = f"ERROR: {line}"
-                                        # Use thread-safe method to update UI
-                                        self.output_console.appendPlainText(display_line.rstrip())
-                                        stderr_parts.append(line)
-                                    else:
-                                        # Thread-safe UI update
-                                        self.output_console.appendPlainText(line.rstrip())
-                                        stdout_parts.append(line)
-                    
-                                    # Check if this looks like an input prompt
-                                    # Common patterns that indicate program is waiting for input
-                                    prompt_indicators = [
-                                        ':', '?', 'input', 'enter', '>>', '>>>', 
-                                        'password', 'username', 'name', 'value'
-                                    ]
-                    
-                                    line_lower = line.lower().strip()
-                                    if any(indicator in line_lower for indicator in prompt_indicators):
-                                        # Use signals or QTimer to update UI from main thread
-                                        self.status_bar.showMessage(f"WAITING FOR INPUT: {line.strip()}")
-                                        if hasattr(self, 'input_line'):
-                                            self.input_line.setPlaceholderText(line.strip())
-                                            self.input_line.setFocus()
-                                else:
-                                    # No data available, short sleep
-                                    time.sleep(0.01)
-                            except Exception as e:
-                                # If read fails, break
-                                break
-                
-                    except Exception:
-                        pass
-    
-                    # Read any remaining data
-                    try:
-                        remaining = stream.read()
-                        if remaining:
-                            if is_stderr:
-                                self.output_console.appendPlainText(f"ERROR: {remaining}")
-                                stderr_parts.append(remaining)
-                            else:
-                                self.output_console.appendPlainText(remaining)
-                                stdout_parts.append(remaining)
-                    except:
-                        pass
-            
-                # Start threads to read stdout and stderr
-                stdout_thread = threading.Thread(
-                    target=read_stream, 
-                    args=(self.current_process.stdout, False),
-                    daemon=True
-                )
-                stderr_thread = threading.Thread(
-                    target=read_stream, 
-                    args=(self.current_process.stderr, True),
-                    daemon=True
-                )
-            
-                stdout_thread.start()
-                stderr_thread.start()
-            
-                # Wait for process to complete
-                while not self.process_finished and self.current_process.poll() is None:
-                    time.sleep(0.1)
-            
-                # Wait for reader threads to finish
-                stdout_thread.join(timeout=1)
-                stderr_thread.join(timeout=1)
-            
-            except Exception as e:
-                error_msg = f"\nProcess execution error: {str(e)}\n"
-                tb = traceback.format_exc()
-                error_msg += f"Traceback:\n{tb}\n"
-                self.output_console.appendPlainText(error_msg)
-                stderr_parts.append(error_msg)
-        
-            finally:
-                self.process_finished = True
-            
-                # Clean up process
-                try:
-                    if self.current_process and self.current_process.poll() is None:
-                        try:
-                            import signal
-                            if sys.platform == "win32":
-                                self.current_process.terminate()
-                            else:
-                                os.killpg(os.getpgid(self.current_process.pid), signal.SIGTERM)
-                            self.current_process.wait(timeout=2)
-                        except:
-                            pass
-                except:
-                    pass
-            
-                # Always try to remove the temporary file
-                try:
-                    os.remove(temp_path)
-                except:
-                    pass
-            
-                # Build final output strings
-                stdout = "".join(stdout_parts)
-                stderr = "".join(stderr_parts)
-            
-                # Final messages
-                self.output_console.appendPlainText("\n=== EXECUTION COMPLETE ===")
-            
-                # Try to find line errors
-                self.highlight_error_line(stderr)
-            
-                # Update status and clean up UI
-                self.status_bar.showMessage("EXECUTION COMPLETE")
-            
-                # Hide input frame
-                if hasattr(self, 'input_frame'):
-                    self.input_frame.hide()
-            
-                # Remove stop button
-                try:
-                    self.status_bar.removeWidget(self.stop_button)
-                    self.stop_button = None
-                except:
-                    pass  
-    
-    def send_input_to_process(self):
-        """Send input from the input line to the running process"""
-        if not hasattr(self, 'process_worker') or not self.process_worker:
-            return
-        
-        text = self.input_line.text()
-        self.input_line.clear()
-        
-        if text:
-            # Echo the input to output console
-            self.output_console.appendPlainText(f"[INPUT]: {text}")
-            
-            # Send to the process worker
-            self.process_worker.send_input(text)
-
     def highlight_error_line(self, error_text):
         if not error_text:
             return
