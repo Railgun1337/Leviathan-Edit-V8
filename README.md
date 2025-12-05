@@ -1,4 +1,4 @@
-# LEVIATHAN EDIT v4 — TOP SECRET // NOFORN PENTEST COMMAND CENTER
+# LEVIATHAN EDIT v6 — TOP SECRET // NOFORN PENTEST COMMAND CENTER
 
 <img src="https://raw.githubusercontent.com/Railgun1337/leviathan-edit/main/screenshot.png" alt="LEVIATHAN EDIT in FBI Terminal theme" width="100%"/>
 
