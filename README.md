@@ -29,7 +29,10 @@ A hyper-stylized, classified-themed, offensive-security code editor built purely
 |-----------------------------|-------------------------------|-------------------------------|
 | ![FBI] <img width="2393" height="1292" alt="Screenshot 2025-12-04 201922" src="https://github.com/user-attachments/assets/eee4ccaa-a1ef-4698-bb6b-2c26820a4503" /> | ![CIA] <img width="402" height="465" alt="Screenshot 2025-12-04 201950" src="https://github.com/user-attachments/assets/3c41ba44-93ee-4593-be18-84ede1a89a38" />
 | ![NSA] <img width="1002" height="790" alt="Screenshot 2025-12-04 202008" src="https://github.com/user-attachments/assets/e1412012-9188-47f8-af03-eced627173d4" />
- |
+ | <img width="307" height="1237" alt="image" src="https://github.com/user-attachments/assets/d5fdbca8-fc8f-4bda-862e-19a24531a205" /> <img width="1592" height="167" alt="image" src="https://github.com/user-attachments/assets/42729843-95c5-4b9c-86cc-2daca5f6e750" /> <img width="441" height="1206" alt="image" src="https://github.com/user-attachments/assets/4f969a59-e542-40e6-958d-e56f7f4e7eeb" />
+
+
+
 
 
  BUG LOG: V7 Fixes an issue previous versions had when attempting to run any code that required user input. Please continue reporting bugs as I greatly appreciate it<3!
