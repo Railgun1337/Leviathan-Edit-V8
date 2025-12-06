@@ -45,6 +45,10 @@ from PyQt6.QtWidgets import QListWidget, QListWidgetItem
 from PyQt6.QtCore import Qt, QPoint
 
 
+# ============================================================================
+# REPLACE YOUR ENTIRE ProcessWorker CLASS WITH THIS FIXED VERSION
+# ============================================================================
+
 class ProcessWorker(QObject):
     output_received = pyqtSignal(str, bool)  # text, is_error
     input_prompt = pyqtSignal(str)
@@ -57,15 +61,18 @@ class ProcessWorker(QObject):
         self.temp_file_path = temp_file_path
         self.process = None
         self.process_finished = False
-        self.stdout_buffer = ""
-        self.stderr_buffer = ""
+        self.line_buffer = ""
+        self.last_prompt_emitted = ""
         
     def run(self):
         try:
-            # Use Popen with -u flag for Python to force unbuffered output
             if "python" in self.command.lower():
                 self.command = self.command.replace('python ', 'python -u ')
                 self.command = self.command.replace('"python" ', '"python" -u ')
+            
+            env = os.environ.copy()
+            if sys.platform == "win32":
+                env["PROMPT"] = ""
             
             self.process = subprocess.Popen(
                 self.command,
@@ -74,38 +81,29 @@ class ProcessWorker(QObject):
                 stdin=subprocess.PIPE,
                 shell=True,
                 text=True,
-                bufsize=0,  # CHANGED: Completely unbuffered
+                bufsize=0,
                 universal_newlines=True,
+                env=env,
                 creationflags=subprocess.CREATE_NEW_PROCESS_GROUP if sys.platform == "win32" else 0
             )
             
             self.process_started.emit()
             
-            # Start threads to read stdout and stderr
             stdout_thread = threading.Thread(target=self.read_stdout, daemon=True)
             stderr_thread = threading.Thread(target=self.read_stderr, daemon=True)
             
             stdout_thread.start()
             stderr_thread.start()
             
-            # Wait for process to complete
             while not self.process_finished and self.process.poll() is None:
                 time.sleep(0.05)
             
-            # Wait for threads to finish reading
             stdout_thread.join(timeout=2)
             stderr_thread.join(timeout=2)
-            
-            # Flush any remaining output
-            if self.stdout_buffer:
-                self.output_received.emit(self.stdout_buffer, False)
-            if self.stderr_buffer:
-                self.output_received.emit(self.stderr_buffer, True)
             
         except Exception as e:
             self.output_received.emit(f"Process execution error: {str(e)}\n", True)
         finally:
-            # Clean up temp file
             try:
                 if os.path.exists(self.temp_file_path):
                     os.remove(self.temp_file_path)
@@ -114,70 +112,108 @@ class ProcessWorker(QObject):
             
             self.finished.emit()
     
+    def should_suppress_line(self, line):
+        """Check if a line should be suppressed (CMD junk)"""
+        line_stripped = line.strip()
+        
+        if not line_stripped:
+            return True
+            
+        suppress_patterns = [
+            r'^[A-Z]:\\',               # ANY Windows path (C:\, C:\Windows, etc)
+            r'^title\s',                # title commands
+            r'^cls\s*$',                # cls commands
+            r'^clear\s*$',              # clear commands
+            r'^echo off',               # batch echo
+            r'^\s*@echo\s',             # batch echo
+        ]
+        
+        for pattern in suppress_patterns:
+            if re.match(pattern, line_stripped, re.IGNORECASE):
+                return True
+        return False
+    
     def read_stdout(self):
-        """FIXED: Read character by character to catch prompts immediately"""
+        """Read stdout line by line and filter intelligently"""
         try:
             while self.process and self.process.poll() is None and not self.process_finished:
                 try:
-                    # Read one character at a time
                     char = self.process.stdout.read(1)
                     
                     if char:
-                        self.stdout_buffer += char
+                        self.line_buffer += char
                         
-                        # Emit character immediately so it shows in real-time
-                        self.output_received.emit(char, False)
+                        # Process complete lines (ending with newline)
+                        if char == '\n':
+                            line = self.line_buffer
+                            
+                            # Only emit if not suppressed
+                            if not self.should_suppress_line(line):
+                                self.output_received.emit(line, False)
+                            
+                            # Clear buffer
+                            self.line_buffer = ""
                         
-                        # Check if buffer ends with common input indicators
-                        # This catches prompts that don't end with newline
-                        buffer_end = self.stdout_buffer[-50:].strip().lower() if len(self.stdout_buffer) > 0 else ""
-                        
-                        # Detect input prompts (no newline needed!)
-                        prompt_indicators = [
-                            ':', '?', '>', 
-                            'input', 'enter', 'name', 'password', 'age',
-                            'please', 'type', 'choose', 'select'
-                        ]
-                        
-                        # If we see these patterns, emit input prompt
-                        for indicator in prompt_indicators:
-                            if indicator in buffer_end and len(buffer_end) > 0:
-                                # Wait a tiny bit to see if more text comes
-                                time.sleep(0.05)
-                                
-                                # If no more output, this is likely a prompt
-                                if self.process.poll() is None:
-                                    # Get last line as prompt
-                                    last_line = self.stdout_buffer.split('\n')[-1].strip()
-                                    if len(last_line) > 0:
-                                        self.input_prompt.emit(last_line)
-                                        break
+                        # Handle prompts (no newline) - wait for stable input
+                        else:
+                            # Wait until buffer has reasonable content
+                            if len(self.line_buffer) > 3:
+                                # Check if this is CMD junk
+                                if self.should_suppress_line(self.line_buffer):
+                                    # Keep buffering, don't emit yet
+                                    pass
+                                else:
+                                    # Check if this looks like an input prompt
+                                    buffer_lower = self.line_buffer.lower()
+                                    prompt_indicators = [':', '?', 'name', 'enter', 'input', 'password', 'age', 'choice']
+                                    
+                                    # Check if buffer ends with a prompt indicator
+                                    ends_with_prompt = any(
+                                        self.line_buffer.rstrip().endswith(ind) 
+                                        for ind in [':', '?', '> ']
+                                    )
+                                    
+                                    has_prompt_word = any(ind in buffer_lower for ind in prompt_indicators)
+                                    
+                                    if (ends_with_prompt or has_prompt_word) and len(self.line_buffer.strip()) > 2:
+                                        # Wait a moment to ensure no more output
+                                        time.sleep(0.1)
+                                        
+                                        # Check if process is still waiting (not finished)
+                                        if self.process.poll() is None:
+                                            # Only emit if different from last prompt
+                                            if self.line_buffer.strip() != self.last_prompt_emitted:
+                                                self.output_received.emit(self.line_buffer, False)
+                                                self.input_prompt.emit(self.line_buffer.strip())
+                                                self.last_prompt_emitted = self.line_buffer.strip()
+                                                self.line_buffer = ""
                     else:
-                        # No data available
                         time.sleep(0.01)
                         
                 except Exception:
                     break
+            
+            # Emit any remaining buffer at end
+            if self.line_buffer.strip() and not self.should_suppress_line(self.line_buffer):
+                self.output_received.emit(self.line_buffer, False)
                     
         except Exception:
-            if self.stdout_buffer:
-                self.output_received.emit(self.stdout_buffer, False)
+            pass
     
     def read_stderr(self):
-        """Read stderr character by character"""
+        """Read stderr line by line"""
         try:
             while self.process and self.process.poll() is None and not self.process_finished:
                 try:
-                    char = self.process.stderr.read(1)
-                    if char:
-                        self.output_received.emit(char, True)
+                    line = self.process.stderr.readline()
+                    if line and line.strip():
+                        self.output_received.emit(line, True)
                     else:
                         time.sleep(0.01)
                 except Exception:
                     pass
         except Exception:
-            if self.stderr_buffer:
-                self.output_received.emit(self.stderr_buffer, True)
+            pass
     
     def send_input(self, text):
         """Send input to the process"""
@@ -185,6 +221,8 @@ class ProcessWorker(QObject):
             try:
                 self.process.stdin.write(text + "\n")
                 self.process.stdin.flush()
+                self.line_buffer = ""
+                self.last_prompt_emitted = ""  # Reset so next prompt shows
                 return True
             except Exception as e:
                 self.output_received.emit(f"Input error: {str(e)}\n", True)
