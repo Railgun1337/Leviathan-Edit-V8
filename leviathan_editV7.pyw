@@ -951,13 +951,11 @@ subprocess.call(["/bin/sh", "-i"])
         self.autocomplete_popup.hide()
 
     def send_input_to_process(self):
-        """FIXED: Send input from the input line to the running process"""
-        # Check if process exists and is running
+        """Send input from the input line to the running process"""
         if not hasattr(self, 'process_worker') or self.process_worker is None:
             self.output_console.appendPlainText("\n✗ ERROR: No process is running")
             return
         
-        # Check if process is still alive
         if hasattr(self.process_worker, 'process') and self.process_worker.process:
             if self.process_worker.process.poll() is not None:
                 self.output_console.appendPlainText("\n✗ ERROR: Process has already finished")
@@ -970,14 +968,15 @@ subprocess.call(["/bin/sh", "-i"])
         
         self.input_line.clear()
         
-        # Echo the input to output console
-        self.output_console.appendPlainText(f"{text}")
+        # Echo the input to output console with prefix
+        self.output_console.appendPlainText(f"[USER INPUT]: {text}")
         
         # Send to the process worker
         success = self.process_worker.send_input(text)
         if not success:
             self.output_console.appendPlainText("✗ ERROR: Failed to send input to process")
             self.cleanup_after_process()
+
     
     def clear_console_now(self):
         """Manual console clear button"""
@@ -989,7 +988,7 @@ subprocess.call(["/bin/sh", "-i"])
         self.input_frame.show()
         if prompt:
             self.input_line.setPlaceholderText(prompt)
-        self.input_line.setFocus()
+            self.input_line.setFocus()
 
     def hide_input_prompt(self):
         """Hide the input console"""
@@ -1578,7 +1577,6 @@ subprocess.call(["/bin/sh", "-i"])
         path, _ = QFileDialog.getOpenFileName(
             self, "Open File", 
             "", "All Files (*.*);;Python (*.py);;JavaScript (*.js);;HTML (*.html);;CSS (*.css);;Bash (*.sh)"
-            "", "All Files (*);;Python (*.py);;JavaScript (*.js);;HTML (*.html);;CSS (*.css);;Bash (*.sh)"
         )
         if not path:
             return
@@ -1926,85 +1924,106 @@ subprocess.call(["/bin/sh", "-i"])
     
         # Create process worker
         self.process_worker = ProcessWorker(command, temp_path)
-        self.process_worker.output_received.connect(self.handle_output)
-        self.process_worker.input_prompt.connect(self.handle_input_prompt)
-        self.process_worker.process_started.connect(self.handle_process_started)  # NEW
-        self.process_worker.finished.connect(self.handle_process_finished)
-    
+        
         # Start worker in a thread
         self.process_thread = QThread()
         self.process_worker.moveToThread(self.process_thread)
+        
+        # CRITICAL: Connect signals in the right order BEFORE starting thread
+        # When worker finishes, it tells thread to quit, then cleanup happens
+        self.process_worker.finished.connect(self.handle_process_finished)
+        self.process_worker.finished.connect(self.process_thread.quit)  # Tell thread to stop
+        self.process_thread.finished.connect(self.cleanup_thread)  # Cleanup when thread stops
+        
+        # Connect other signals
+        self.process_worker.output_received.connect(self.handle_output)
+        self.process_worker.input_prompt.connect(self.handle_input_prompt)
+        self.process_worker.process_started.connect(self.handle_process_started)
+        
+        # Start the thread
         self.process_thread.started.connect(self.process_worker.run)
-        self.process_thread.finished.connect(self.cleanup_thread)
         self.process_thread.start()
 
     def handle_process_started(self):
         """Called when the process actually starts"""
         self.status_bar.showMessage("RUNNING... Process started successfully")
 
-
     def stop_current_process(self):
         """FIXED: Stop the currently running process without crashing"""
-        # Check if process exists
         if not hasattr(self, 'process_worker') or self.process_worker is None:
             self.output_console.appendPlainText("\n=== NO PROCESS RUNNING ===")
+            self.cleanup_after_process()
             return
         
-        # Stop the process
-        self.process_worker.stop()
-        self.output_console.appendPlainText("\n=== PROCESS STOPPED BY USER ===")
+        # Check if process is actually running
+        try:
+            if hasattr(self.process_worker, 'process') and self.process_worker.process:
+                if self.process_worker.process.poll() is not None:
+                    self.output_console.appendPlainText("\n=== PROCESS ALREADY FINISHED ===")
+                    self.cleanup_after_process()
+                    return
+        except:
+            pass
         
-        # Force cleanup immediately
-        self.cleanup_after_process()
-
+        # Stop the process
+        try:
+            self.process_worker.stop()
+            self.output_console.appendPlainText("\n=== PROCESS STOPPED BY USER ===")
+        except Exception as e:
+            self.output_console.appendPlainText(f"\n=== ERROR STOPPING PROCESS: {str(e)} ===")
             
     def cleanup_thread(self):
-        """Clean up the thread object"""
+        """Clean up the thread object - called by thread.finished signal"""
+        # This is called automatically when thread finishes
+        # Just mark as None, don't try to stop it
         if hasattr(self, 'process_thread'):
-            try:
-                self.process_thread.quit()
-                self.process_thread.wait(500)  # Wait up to 0.5 second
-                self.process_thread.deleteLater()
-                self.process_thread = None
-            except:
-                pass
-            finally:
-                self.process_thread = None
+            self.process_thread = None
+
             
     def cleanup_after_process(self):
-        """FIXED: Clean up after process finishes"""
+        """FIXED: Clean up after process finishes - prevent crashes"""
         # Hide input frame
         if hasattr(self, 'input_frame'):
-            self.input_frame.hide()
+            try:
+                self.input_frame.hide()
+            except:
+                pass
         
         # Remove and delete stop button safely
         if hasattr(self, 'stop_button') and self.stop_button is not None:
             try:
                 self.status_bar.removeWidget(self.stop_button)
-                self.stop_button.deleteLater()
-            except RuntimeError:
-                # Widget already deleted
+            except:
                 pass
-            finally:
-                self.stop_button = None
+            
+            try:
+                self.stop_button.deleteLater()
+            except:
+                pass
+            
+            self.stop_button = None
         
-        # Clean up thread
+        # DON'T manually stop thread here - it should already be finishing
+        # Just mark it for deletion
         if hasattr(self, 'process_thread') and self.process_thread is not None:
             try:
-                if self.process_thread.isRunning():
-                    self.process_thread.quit()
-                    self.process_thread.wait(1000)
+                # Don't call quit() or wait() - thread should be stopping naturally
+                # Just schedule for deletion when it's actually done
                 self.process_thread.deleteLater()
-            except RuntimeError:
+            except:
                 pass
-            finally:
-                self.process_thread = None
+            
+            self.process_thread = None
         
         # Reset worker
-        self.process_worker = None
+        if hasattr(self, 'process_worker'):
+            self.process_worker = None
         
         # Update status
-        self.status_bar.showMessage("READY")
+        try:
+            self.status_bar.showMessage("READY")
+        except:
+            pass
 
     def handle_output(self, text, is_error):
         if text.strip():  # Only append non-empty lines
@@ -2042,11 +2061,11 @@ subprocess.call(["/bin/sh", "-i"])
             self.status_bar.showMessage(f"⚠ INPUT REQUIRED: {prompt[:60]}")
             
     def handle_process_finished(self):
-        """FIXED: Called when the process finishes"""
+        """Called when the process finishes naturally OR is stopped"""
         self.output_console.appendPlainText("\n=== EXECUTION COMPLETE ===")
         self.status_bar.showMessage("EXECUTION COMPLETE")
         
-        # Clean up immediately (no timer needed)
+        # Clean up immediately when process signals it's done
         self.cleanup_after_process()
     
     def finalize_process(self):
