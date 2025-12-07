@@ -1,0 +1,9 @@
+PyQt6==6.7.0
+pygments==2.18.0
+jedi==0.19.1
+
+# Optional but recommended for better performance
+watchdog==3.0.0
+
+# For Windows users (improves subprocess handling)
+pywin32==306
