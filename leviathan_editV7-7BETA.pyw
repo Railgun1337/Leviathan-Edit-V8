@@ -1,5 +1,5 @@
 # leviathan_edit.pyw
-# LEVIATHAN EDIT v3.0 - PYQT6 POWERED ULTIMATE EDITION
+# LEVIATHAN EDIT v7.7 - PYQT6 POWERED ULTIMATE EDITION
 # FIXED: Input handling and crash fixes
 # FIXED: File browser integration
 # edited version for a file browser and if you're a dev please consider adding some documentation
@@ -903,7 +903,10 @@ class CustomizationDialog(QDialog):
         super().__init__(parent)
         self.parent_window = parent
         self.setWindowTitle("COMPLETE CUSTOMIZATION")
-        self.resize(800, 700)
+        self.resize(700, 600)
+        
+        # Make window resizable
+        self.setWindowFlags(self.windowFlags() | Qt.WindowType.WindowMaximizeButtonHint)
         
         # Store original colors for reset
         self.original_colors = {}
@@ -1264,22 +1267,31 @@ class CustomizationDialog(QDialog):
             self.parent_window.preview_custom_colors(colors)
             
     def apply_and_save(self):
-        """Apply and save customization"""
+        """Apply and save customization - FIXED VERSION"""
         if self.parent_window:
-            # Collect all colors
+            # Collect all colors from ALL tabs
             colors = {}
             for key, widgets in self.color_widgets.items():
                 colors[key] = widgets['input'].text()
-            
+                print(f"DEBUG: Saving color '{key}': {widgets['input'].text()}")
+        
             # Apply to parent
             self.parent_window.apply_custom_colors(colors)
-            
-            # Save to file
+        
+            # Save to file - IMPORTANT: Save ALL custom colors, not just these
             self.parent_window.save_custom_colors(colors)
-            
+        
+            # Show confirmation with file path
+            config_dir = os.path.join(os.path.expanduser('~'), '.leviathan_edit')
+            config_file = os.path.join(config_dir, 'custom_colors.json')
+        
             QMessageBox.information(self, "CUSTOMIZATION SAVED", 
-                                  "Custom colors have been applied and saved!\n"
-                                  "They will persist when you restart the application.")
+                                f"Custom colors have been applied and saved!\n"
+                                f"They will persist when you restart the application.\n\n"
+                                f"File: {config_file}")
+        
+            # Close the dialog
+            self.close()
             
     def reset_to_defaults(self):
         """Reset all colors to defaults"""
@@ -1299,31 +1311,25 @@ class CustomizationDialog(QDialog):
 class LeviathanEditUltimate(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("LEVIATHAN EDIT v3.0 - ULTIMATE CLASSIFIED PENTEST EDITOR")
+        self.setWindowTitle("LEVIATHAN EDIT v7.7 - ULTIMATE PENTESTING CODE EDITOR")
         self.setGeometry(100, 100, 1600, 1000)
-        
+    
         # Initialize themes
         self.init_themes()
-        self.current_theme = "FBI Terminal"
-
+        self.current_theme = "FBI Terminal"  # Use a theme that exists
+    
         # Initialize custom_colors with complete theme, THEN load customizations
         self.custom_colors = self.themes[self.current_theme].copy()
-
-        # Load custom colors (this should only override specific keys)
-        loaded_colors = self.load_custom_colors()
-        if loaded_colors:
-            # Merge loaded colors with theme defaults
-            for key, value in loaded_colors.items():
-                self.custom_colors[key] = value
-        
+    
         # Initialize language settings
         self.current_language = "Python"
         self.lexer = get_lexer_by_name("python")
-        
-        # Font size
+    
+        # ===== INITIALIZE FONT SIZE HERE =====
+        # Font size - MUST BE SET BEFORE create_ui()
         self.base_font_size = 14
-        self.current_font_size = 14
-        
+        self.current_font_size = 14  # <-- THIS LINE IS CRITICAL
+    
         # Background image
         self.background_image_path = None
         self.current_transparency = 1.0
@@ -1331,20 +1337,23 @@ class LeviathanEditUltimate(QMainWindow):
 
         # Custom templates
         self.custom_templates = self.load_custom_templates()
-        
+    
         # Process management
         self.process_worker = None
         self.process_thread = None
         self.stop_button = None
-        
-        # Create UI
+    
+        # ===== NOW create UI (font size is initialized) =====
         self.create_ui()
+    
+        # Load custom colors (this will apply them)
+        self.load_custom_colors()
         
         # Load initial content into first tab
         current_tab = self.tabs.currentWidget()
         if hasattr(current_tab, 'editor'):
             current_tab.editor.setPlainText("""# TOP SECRET // NOFORN // EYES ONLY
-# LEVIATHAN EDIT v3.0 - PYQT6 ULTIMATE EDITION
+# LEVIATHAN EDIT v7.7 - PYQT6 ULTIMATE EDITION
 
 import socket, subprocess, os
 s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -1722,13 +1731,13 @@ subprocess.call(["/bin/sh", "-i"])
         outer_sidebar_layout.addWidget(sidebar)
 
         # TITLE
-        title = QLabel("LEVIATHAN\nEDIT v3.0")
+        title = QLabel("LEVIATHAN\nEDIT v7.7")
         title.setFont(QFont("Orbitron", 28, QFont.Weight.Bold))
         title.setStyleSheet("color: #00ff41; background: transparent;")
         title.setAlignment(Qt.AlignmentFlag.AlignCenter)
         sidebar_layout.addWidget(title)
 
-        version = QLabel("ULTIMATE PYQT6 EDITION")
+        version = QLabel("ULTIMATE EDITION")
         version.setFont(QFont("Consolas", 10))
         version.setStyleSheet("color: #ff0066; background: transparent;")
         version.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -2042,7 +2051,7 @@ subprocess.call(["/bin/sh", "-i"])
                 border-top: 2px solid #ff0066;
             }
         """)
-        self.status_bar.showMessage("STATUS: ACTIVE // LEVIATHAN EDIT v3.0 // THEME: FBI Terminal")
+        self.status_bar.showMessage("STATUS: ACTIVE // LEVIATHAN EDIT v7.7 // THEME: FBI Terminal")
         # === OUTPUT CONSOLE ===
         self.output_console = QPlainTextEdit()
         self.output_console.setReadOnly(True)
@@ -3179,21 +3188,60 @@ subprocess.call(["/bin/sh", "-i"])
     
         c = self.custom_colors  # Shorter alias
     
-        # === SIDEBAR BACKGROUND ===
-        sidebar = self.findChild(QFrame)  # Find the main sidebar frame
-        if sidebar:
-            sidebar.setStyleSheet(f"""
-                QFrame {{
-                    background-color: {c.get('sidebar_bg', '#111122')};
-                    border-right: 2px solid {c.get('accent', '#00ff41')};
-                }}
-            """)
+        # === SIDEBAR BACKGROUND - 100% WORKING VERSION ===
+        sidebar_bg_color = c.get('sidebar_bg', '#111122')
+        accent_color = c.get('accent', '#00ff41')
+    
+        # Step 1: Find the sidebar scroll area (it's the first widget in main layout)
+        central = self.centralWidget()
+        if central and central.layout():
+            main_layout = central.layout()
+        
+            # The first widget in main_layout should be the sidebar QScrollArea
+            if main_layout.count() > 0:
+                sidebar_scroll = main_layout.itemAt(0).widget()
+                if sidebar_scroll:
+                    print(f"DEBUG: Found sidebar scroll area: {sidebar_scroll}")
+                
+                    # Apply style to the scroll area itself
+                    sidebar_scroll.setStyleSheet(f"""
+                        QScrollArea {{
+                            background-color: {sidebar_bg_color};
+                            border: none;
+                        }}
+                        QScrollArea > QWidget > QWidget {{
+                            background-color: {sidebar_bg_color};
+                        }}
+                        QScrollArea QFrame {{
+                            background-color: {sidebar_bg_color};
+                            border-right: 2px solid {accent_color};
+                        }}
+                    """)
+                
+                    # Step 2: Find the container widget inside the scroll area
+                    container = sidebar_scroll.widget()
+                    if container:
+                        container.setStyleSheet(f"""
+                            QWidget {{
+                                background-color: {sidebar_bg_color};
+                            }}
+                        """)
+                    
+                        # Step 3: Find the actual QFrame (sidebar) inside the container
+                        for frame in container.findChildren(QFrame):
+                            frame.setStyleSheet(f"""
+                                QFrame {{
+                                    background-color: {sidebar_bg_color};
+                                    border-right: 2px solid {accent_color};
+                                }}
+                            """)
+                            print(f"DEBUG: Styled QFrame: {frame}")
     
         # === SIDEBAR TITLES ===
         for label in self.findChildren(QLabel):
-            if "LEVIATHAN\nEDIT v3.0" in label.text():
+            if "LEVIATHAN\nEDIT v7.7" in label.text():
                 label.setStyleSheet(f"color: {c.get('sidebar_title', '#00ff41')};")
-            elif "ULTIMATE PYQT6 EDITION" in label.text():
+            elif "ULTIMATE EDITION" in label.text():
                 label.setStyleSheet(f"color: {c.get('sidebar_version', '#ff0066')};")
             elif any(keyword in label.text() for keyword in ["CLASSIFIED TOOLS", "CLASSIFIED THEMES", "DISPLAY SETTINGS"]):
                 label.setStyleSheet(f"color: {c.get('sidebar_labels', '#00ffaa')};")
@@ -3298,6 +3346,36 @@ subprocess.call(["/bin/sh", "-i"])
     
         if not preview:
             self.status_bar.showMessage("CUSTOM COLORS APPLIED")
+            
+    def debug_colors(self):
+        """Debug method to see current colors"""
+        print("\n=== DEBUG COLOR STATUS ===")
+        print(f"Current theme: {self.current_theme}")
+        print(f"Total color keys: {len(self.custom_colors)}")
+    
+        # Show first 20 keys as sample
+        print("\nSample colors:")
+        for i, (key, value) in enumerate(list(self.custom_colors.items())[:20]):
+            print(f"  {key}: {value}")
+    
+        # Check if sidebar_bg exists
+        if 'sidebar_bg' in self.custom_colors:
+            print(f"\nsidebar_bg exists: {self.custom_colors['sidebar_bg']}")
+        else:
+            print("\nERROR: sidebar_bg NOT FOUND in custom_colors!")
+    
+        # Check config file
+        config_file = os.path.join(os.path.expanduser('~'), '.leviathan_edit', 'custom_colors.json')
+        if os.path.exists(config_file):
+            print(f"\nConfig file exists: {config_file}")
+            with open(config_file, 'r') as f:
+                import json
+                saved = json.load(f)
+                print(f"Saved keys: {len(saved)}")
+                if 'sidebar_bg' in saved:
+                    print(f"saved sidebar_bg: {saved['sidebar_bg']}")
+        else:
+            print(f"\nNo config file at: {config_file}")
 
     def apply_individual_button_style(self, button_obj_name, colors):
         """Apply custom style to an individual button - FIXED VERSION"""
@@ -3568,8 +3646,10 @@ subprocess.call(["/bin/sh", "-i"])
         return True
 
     def save_custom_colors(self, colors):
-        """Save custom colors to a JSON file"""
+        """Save custom colors to a JSON file - FIXED VERSION"""
         import json
+        import os
+    
         config_dir = os.path.join(os.path.expanduser('~'), '.leviathan_edit')
     
         if not os.path.exists(config_dir):
@@ -3578,33 +3658,75 @@ subprocess.call(["/bin/sh", "-i"])
         config_file = os.path.join(config_dir, 'custom_colors.json')
     
         try:
-            with open(config_file, 'w') as f:
-                json.dump(colors, f, indent=4)
+            # Save ALL current custom colors (not just the ones passed in)
+            with open(config_file, 'w', encoding='utf-8') as f:
+                json.dump(self.custom_colors, f, indent=4)
+        
+            print(f"DEBUG: Saved {len(self.custom_colors)} colors to {config_file}")
+        
+            # Verify the file was saved
+            if os.path.exists(config_file):
+                file_size = os.path.getsize(config_file)
+                print(f"DEBUG: File saved successfully, size: {file_size} bytes")
+            else:
+                print("ERROR: File was not created!")
+            
         except Exception as e:
-            print(f"Error saving colors: {e}")
+            print(f"ERROR saving colors: {e}")
+            # Try to show error in status bar
+            try:
+                self.status_bar.showMessage(f"ERROR saving colors: {str(e)}")
+            except:
+                pass
 
     def load_custom_colors(self):
-        """Load custom colors from JSON file"""
+        """Load custom colors from JSON file and APPLY them immediately"""
         import json
-        config_file = os.path.join(os.path.expanduser('~'), '.leviathan_edit', 'custom_colors.json')
+        import os
     
+        # Create config directory
+        config_dir = os.path.join(os.path.expanduser('~'), '.leviathan_edit')
+        config_file = os.path.join(config_dir, 'custom_colors.json')
+    
+        print(f"DEBUG: Looking for config at {config_file}")
+    
+        # Start with current theme as default
+        theme_name = "FBI Terminal"  # Use a theme you KNOW exists
+        if self.current_theme in self.themes:
+            theme_name = self.current_theme
+    
+        theme_colors = self.themes[theme_name].copy()
+    
+        # Store in custom_colors
+        self.custom_colors = theme_colors
+    
+        # Check if custom colors file exists
         if os.path.exists(config_file):
             try:
-                with open(config_file, 'r') as f:
+                with open(config_file, 'r', encoding='utf-8') as f:
                     loaded_colors = json.load(f)
-                
-                    # Instead of replacing the entire dictionary, only update the keys that exist
-                    # This ensures we keep all the default theme keys
-                    for key, value in loaded_colors.items():
-                        self.custom_colors[key] = value
-                    
-                    return loaded_colors
-            except:
-                # If there's any error, fall back to default theme
-                self.custom_colors = self.themes[self.current_theme].copy()
+            
+                print(f"DEBUG: Found {len(loaded_colors)} saved colors")
+            
+                # Update our colors with saved ones
+                for key, value in loaded_colors.items():
+                    self.custom_colors[key] = value
+            
+                print(f"DEBUG: Total colors after merge: {len(self.custom_colors)}")
+            
+                # IMPORTANT: Apply the loaded colors immediately
+                self.apply_custom_colors(self.custom_colors)
+            
+                return loaded_colors
+            
+            except Exception as e:
+                print(f"ERROR loading custom colors: {e}")
+                # Still apply theme defaults
+                self.apply_custom_colors(self.custom_colors)
         else:
-            # No custom colors file, use theme defaults
-            self.custom_colors = self.themes[self.current_theme].copy()
+            print("DEBUG: No saved colors found, using theme defaults")
+            # Apply theme defaults
+            self.apply_custom_colors(self.custom_colors)
     
         return self.custom_colors
 
