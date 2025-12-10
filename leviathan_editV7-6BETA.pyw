@@ -4,6 +4,7 @@
 # FIXED: File browser integration
 # edited version for a file browser and if you're a dev please consider adding some documentation
 import file_browser as FB # Import the file_browser module
+from hex_editor_widget import HexEditorWidget # Import the new Hex Editor
 import sys
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
@@ -1582,7 +1583,8 @@ subprocess.call(["/bin/sh", "-i"])
             ("BASE64 ENCODER/DECODER", self.open_base64_tool),
             ("URL ENCODE/DECODE", self.open_url_tool),
             ("HASH IDENTIFIER", self.open_hash_tool),
-            ("PAYLOAD TEMPLATES", self.open_templates_tool)
+            ("PAYLOAD TEMPLATES", self.open_templates_tool),
+            ("HEX EDITOR", self.open_hex_editor)
         ]
 
         for name, cmd in tools:
@@ -2246,6 +2248,15 @@ subprocess.call(["/bin/sh", "-i"])
         """Open payload templates tool"""
         dialog = TemplatesDialog(self, self.custom_templates)
         dialog.exec()
+
+    def open_hex_editor(self):
+        """Open the hex editor in a new tab"""
+        hex_widget = HexEditorWidget()
+        index = self.tabs.addTab(hex_widget, "Hex Editor")
+        self.tabs.setCurrentIndex(index)
+        # Since this is not a text editor, we don't assign it to tab.editor
+        # This prevents file operations from trying to act on it.
+        self.status_bar.showMessage("HEX EDITOR OPENED")
         
     # ============================================
     #  LANGUAGE → RUN COMMAND MAP
