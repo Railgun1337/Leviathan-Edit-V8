@@ -1075,6 +1075,95 @@ class SyntaxHighlighter(QSyntaxHighlighter):
             for pattern in sql_keywords:
                 self.highlighting_rules.append((QRegularExpression(pattern, QRegularExpression.PatternOption.CaseInsensitiveOption), keyword_format))
 
+        elif self.language in ['xml']:
+            # XML/HTML-like syntax
+            tag_format = QTextCharFormat()
+            tag_format.setForeground(QColor('#e06c75'))
+            tag_format.setFontWeight(QFont.Weight.Bold)
+            
+            attribute_format = QTextCharFormat()
+            attribute_format.setForeground(QColor('#d19a66'))
+            
+            # XML tags
+            self.highlighting_rules.append((QRegularExpression('<[?/]?[a-zA-Z][^>]*[?/]?>'), tag_format))
+            # XML attributes
+            self.highlighting_rules.append((QRegularExpression('\\b[a-zA-Z-]+(?=\\s*=)'), attribute_format))
+            # XML entities
+            self.highlighting_rules.append((QRegularExpression('&[a-zA-Z]+;'), string_format))
+
+        elif self.language in ['json']:
+            # JSON keys (strings before colons)
+            key_format = QTextCharFormat()
+            key_format.setForeground(QColor('#61afef'))
+            key_format.setFontWeight(QFont.Weight.Bold)
+            self.highlighting_rules.append((QRegularExpression('"[^"]*"\\s*:'), key_format))
+            
+            # JSON values
+            value_format = QTextCharFormat()
+            value_format.setForeground(QColor('#98c379'))
+            self.highlighting_rules.append((QRegularExpression(':\\s*"[^"]*"'), value_format))
+            
+            # JSON booleans and null
+            self.highlighting_rules.append((QRegularExpression('\\b(true|false|null)\\b'), keyword_format))
+
+        elif self.language in ['yaml', 'yml']:
+            # YAML keys
+            key_format = QTextCharFormat()
+            key_format.setForeground(QColor('#61afef'))
+            key_format.setFontWeight(QFont.Weight.Bold)
+            self.highlighting_rules.append((QRegularExpression('^\\s*[a-zA-Z_][a-zA-Z0-9_]*:'), key_format))
+            
+            # YAML values after colon
+            self.highlighting_rules.append((QRegularExpression(':\\s+[^\\n]+'), string_format))
+            
+            # YAML anchors and aliases
+            anchor_format = QTextCharFormat()
+            anchor_format.setForeground(QColor('#c678dd'))
+            self.highlighting_rules.append((QRegularExpression('[&*][a-zA-Z_][a-zA-Z0-9_]*'), anchor_format))
+
+        elif self.language in ['markdown', 'md']:
+            # Headers
+            header_format = QTextCharFormat()
+            header_format.setForeground(QColor('#61afef'))
+            header_format.setFontWeight(QFont.Weight.Bold)
+            self.highlighting_rules.append((QRegularExpression('^#{1,6}\\s+.*'), header_format))
+            
+            # Bold
+            bold_format = QTextCharFormat()
+            bold_format.setForeground(QColor('#e06c75'))
+            bold_format.setFontWeight(QFont.Weight.Bold)
+            self.highlighting_rules.append((QRegularExpression('\\*\\*[^*]+\\*\\*'), bold_format))
+            self.highlighting_rules.append((QRegularExpression('__[^_]+__'), bold_format))
+            
+            # Italic
+            italic_format = QTextCharFormat()
+            italic_format.setForeground(QColor('#98c379'))
+            italic_format.setFontItalic(True)
+            self.highlighting_rules.append((QRegularExpression('\\*[^*]+\\*'), italic_format))
+            self.highlighting_rules.append((QRegularExpression('_[^_]+_'), italic_format))
+            
+            # Code blocks
+            code_format = QTextCharFormat()
+            code_format.setForeground(QColor('#d19a66'))
+            self.highlighting_rules.append((QRegularExpression('`[^`]+`'), code_format))
+            
+            # Links
+            link_format = QTextCharFormat()
+            link_format.setForeground(QColor('#56b6c2'))
+            self.highlighting_rules.append((QRegularExpression('\\[[^\\]]+\\]\\([^)]+\\)'), link_format))
+
+        elif self.language in ['dockerfile', 'docker']:
+            # Dockerfile instructions
+            docker_keywords = [
+                '\\bFROM\\b', '\\bRUN\\b', '\\bCMD\\b', '\\bEXPOSE\\b',
+                '\\bENV\\b', '\\bADD\\b', '\\bCOPY\\b', '\\bENTRYPOINT\\b',
+                '\\bVOLUME\\b', '\\bUSER\\b', '\\bWORKDIR\\b', '\\bARG\\b',
+                '\\bONBUILD\\b', '\\bSTOPSIGNAL\\b', '\\bHEALTHCHECK\\b',
+                '\\bSHELL\\b', '\\bMAINTAINER\\b', '\\bLABEL\\b'
+            ]
+            for pattern in docker_keywords:
+                self.highlighting_rules.append((QRegularExpression(pattern), keyword_format))
+
         elif self.language in ['html']:
             # HTML tags
             tag_format = QTextCharFormat()
@@ -2325,7 +2414,8 @@ subprocess.call(["/bin/sh", "-i"])
         
         self.lang_combo = QComboBox()
         self.lang_combo.addItems(["Python", "JavaScript", "HTML", "CSS", "Bash", "C", "C++", 
-                                  "Java", "Go", "Rust", "PHP", "Ruby", "SQL"])
+                                "Java", "Go", "Rust", "PHP", "Ruby", "SQL", "XML", "JSON",
+                                "YAML", "Markdown", "Dockerfile"])
         self.lang_combo.setCurrentText("Python")
         self.lang_combo.setFixedWidth(120)
         self.lang_combo.setStyleSheet("""
@@ -2505,10 +2595,124 @@ subprocess.call(["/bin/sh", "-i"])
         self.load_file_into_new_tab(path)
 
     def load_file_into_new_tab(self, path):
+        """Load file with safety checks for unknown/binary formats"""
+        # Check if file exists
+        if not os.path.exists(path):
+            QMessageBox.critical(self, "ERROR", f"File not found:\n{path}")
+            return
+    
+        # Check file size (warn if > 10MB)
+        file_size = os.path.getsize(path)
+        if file_size > 10 * 1024 * 1024:  # 10MB
+            reply = QMessageBox.question(
+                self, "LARGE FILE WARNING",
+                f"This file is {file_size / (1024*1024):.1f} MB.\n\n"
+                "Large files may cause the editor to freeze.\n\n"
+                "Do you want to continue?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+            )
+            if reply == QMessageBox.StandardButton.No:
+                return
+    
+        # Check if file is binary (not text)
         try:
+            with open(path, 'rb') as f:
+                chunk = f.read(8192)  # Read first 8KB
+            
+            # Check for null bytes (indicates binary)
+            if b'\x00' in chunk:
+                # Definitely binary
+                QMessageBox.warning(
+                    self, "BINARY FILE DETECTED",
+                    f"File: {os.path.basename(path)}\n\n"
+                    "This appears to be a binary file (executable, image, etc.)\n\n"
+                    "Text editors cannot open binary files.\n\n"
+                    "Supported formats:\n"
+                    "• Code files (.py, .js, .c, .cpp, etc.)\n"
+                    "• Text files (.txt, .md, .json, .xml)\n"
+                    "• Configuration files (.yaml, .ini, .conf)"
+                )
+                return
+        
+            # Check for extremely high ratio of non-printable characters
+            text_chars = bytes(range(32, 127)) + b'\n\r\t\b'
+            non_text = sum(1 for byte in chunk if byte not in text_chars)
+        
+            if len(chunk) > 0 and (non_text / len(chunk)) > 0.3:
+                # More than 30% non-printable = probably binary
+                reply = QMessageBox.question(
+                    self, "SUSPICIOUS FILE FORMAT",
+                    f"File: {os.path.basename(path)}\n\n"
+                    "This file contains many non-text characters.\n"
+                    "It may not display correctly.\n\n"
+                    "Continue anyway?",
+                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+                )
+                if reply == QMessageBox.StandardButton.No:
+                    return
+    
+        except Exception as e:
+            QMessageBox.critical(self, "ERROR", f"Failed to check file:\n{str(e)}")
+            return
+    
+        # Safe file extensions (whitelist)
+        safe_extensions = {
+            '.py', '.js', '.html', '.css', '.txt', '.md', '.json', '.xml',
+            '.yaml', '.yml', '.sh', '.bash', '.c', '.cpp', '.h', '.hpp',
+            '.java', '.go', '.rs', '.php', '.rb', '.sql', '.ini', '.conf',
+            '.cfg', '.log', '.csv', '.tsv', '.dockerfile', '.gitignore'
+        }
+    
+        # Known dangerous/binary extensions (blacklist)
+        dangerous_extensions = {
+            '.exe', '.dll', '.so', '.dylib', '.bin', '.dat', '.db', '.sqlite',
+            '.jpg', '.jpeg', '.png', '.gif', '.bmp', '.ico', '.svg',
+            '.mp3', '.mp4', '.avi', '.mkv', '.wav', '.flac',
+            '.zip', '.tar', '.gz', '.7z', '.rar', '.iso',
+            '.pdf', '.doc', '.docx', '.xls', '.xlsx', '.ppt', '.pptx',
+            '.unity3d', '.asset', '.prefab', '.scene', '.meta'
+        }
+    
+        file_ext = os.path.splitext(path)[1].lower()
+    
+        # Block dangerous extensions immediately
+        if file_ext in dangerous_extensions:
+            QMessageBox.warning(
+                self, "UNSUPPORTED FILE TYPE",
+                f"File: {os.path.basename(path)}\n"
+                f"Extension: {file_ext}\n\n"
+                "This file type cannot be opened in a text editor.\n\n"
+                "Blocked file types:\n"
+                "• Executables (.exe, .dll, .so)\n"
+                "• Images (.jpg, .png, .gif)\n"
+                "• Media (.mp3, .mp4, .avi)\n"
+                "• Archives (.zip, .tar, .gz)\n"
+                "• Documents (.pdf, .docx, .xlsx)\n"
+                "• Unity assets (.unity3d, .asset)"
+            )
+            return
+    
+        # Warn on unknown extensions
+        if file_ext and file_ext not in safe_extensions:
+            reply = QMessageBox.question(
+                self, "UNKNOWN FILE TYPE",
+                f"File: {os.path.basename(path)}\n"
+                f"Extension: {file_ext}\n\n"
+                "This file extension is not recognized.\n"
+                "The file may not display correctly.\n\n"
+                "Continue anyway?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+            )
+            if reply == QMessageBox.StandardButton.No:
+                return
+    
+        # Try to load the file
+        try:
+            # Use timeout to prevent infinite freeze
             with open(path, 'r', encoding='utf-8', errors='ignore') as f:
                 data = f.read()
-
+        
+            # Create new tab and load content
             self.create_new_tab()
             ed = self.current_editor()
             if ed:
@@ -2516,28 +2720,50 @@ subprocess.call(["/bin/sh", "-i"])
 
             self.tabs.setTabText(self.tabs.currentIndex(), os.path.basename(path))
             self.status_bar.showMessage(f"Loaded {path}")
-            
+        
+            # Store file path for autosave
+            current_tab = self.tabs.currentWidget()
+            current_tab.file_path = path
+            current_tab.last_saved_content = data
+        
+            # Remember permanently
+            self.remember_file_path(path)
+        
             # Auto-detect language
-            ext = os.path.splitext(path)[1].lower()
             lang_map = {
                 '.py': 'Python', '.js': 'JavaScript', '.html': 'HTML', '.css': 'CSS',
                 '.sh': 'Bash', '.c': 'C', '.cpp': 'C++', '.h': 'C', '.java': 'Java',
-                '.go': 'Go', '.rs': 'Rust', '.php': 'PHP', '.rb': 'Ruby', '.sql': 'SQL'
+                '.go': 'Go', '.rs': 'Rust', '.php': 'PHP', '.rb': 'Ruby', '.sql': 'SQL',
+                '.xml': 'XML', '.json': 'JSON', '.yaml': 'YAML', '.yml': 'YAML',
+                '.md': 'Markdown', '.markdown': 'Markdown', '.dockerfile': 'Dockerfile'
             }
-            
-            if ext in lang_map:
-                lang = lang_map[ext]
+        
+            if file_ext in lang_map:
+                lang = lang_map[file_ext]
                 self.lang_combo.setCurrentText(lang)
                 self.change_language(lang)
-                
+            
                 # Also update the highlighter for this specific tab
                 current_tab = self.tabs.currentWidget()
                 if hasattr(current_tab, 'highlighter'):
                     current_tab.highlighter.set_language(lang.lower())
-            
+        
+        except UnicodeDecodeError:
+            QMessageBox.critical(
+                self, "ENCODING ERROR",
+                f"File: {os.path.basename(path)}\n\n"
+                "This file cannot be decoded as text.\n"
+                "It may be binary or use an unsupported encoding."
+            )
+        except MemoryError:
+            QMessageBox.critical(
+                self, "OUT OF MEMORY",
+                f"File: {os.path.basename(path)}\n\n"
+                "This file is too large to load into memory."
+            )
         except Exception as e:
             QMessageBox.critical(self, "ERROR", f"Failed to open file:\n{str(e)}")
-
+            
     def open_file_from_browser(self, path):
         self.load_file_into_new_tab(path)
 
@@ -2551,6 +2777,9 @@ subprocess.call(["/bin/sh", "-i"])
     
         # Get current tab
         current_tab = self.tabs.currentWidget()
+    
+        # Get the content FIRST (before any file operations)
+        content = ed.toPlainText()
     
         # Check if this file has been saved before
         if hasattr(current_tab, 'file_path') and current_tab.file_path:
@@ -2567,16 +2796,13 @@ subprocess.call(["/bin/sh", "-i"])
                 return
         
             # Store file path for autosave
-            current_tab = self.tabs.currentWidget()
             current_tab.file_path = path
-            current_tab.last_saved_content = data
-
+            
             # Remember permanently
             self.remember_file_path(path)
 
         try:
-            content = ed.toPlainText()
-        
+            # Write the content to the file
             with open(path, 'w', encoding='utf-8') as f:
                 f.write(content)
         
@@ -3203,13 +3429,22 @@ subprocess.call(["/bin/sh", "-i"])
         self.status_bar.showMessage("RUNNING... Process started successfully")
 
     def stop_current_process(self):
-        """FIXED: Stop the currently running process without crashing"""
-        # Disable button immediately to prevent spam
+        """FIXED: Stop the currently running process without crashing - prevents spam"""
+        # Check if we're in cooldown period
+        if hasattr(self, '_stop_timer') and self._stop_timer.isActive():
+            self.status_bar.showMessage("⚠ WAIT: Still stopping previous process...")
+            return
+    
+        # Disable ALL stop mechanisms immediately
         if hasattr(self, 'run_action'):
             self.run_action.setEnabled(False)
             self.run_action.setText("⏳ STOPPING...")
     
-        # Create a timer to re-enable button after 2 seconds (in case stop fails)
+        if hasattr(self, 'stop_button') and self.stop_button:
+            self.stop_button.setEnabled(False)
+            self.stop_button.setText("⏳ STOPPING...")
+    
+        # Create a timer to re-enable after 3 seconds
         if not hasattr(self, '_stop_timer'):
             self._stop_timer = QTimer()
         else:
@@ -3217,12 +3452,12 @@ subprocess.call(["/bin/sh", "-i"])
                 self._stop_timer.stop()
     
         self._stop_timer.setSingleShot(True)
-        self._stop_timer.timeout.connect(lambda: self._reenable_stop_button(force_run=True))
-        self._stop_timer.start(4000)  # 1 second safety timeout
+        self._stop_timer.timeout.connect(lambda: self._force_reenable_buttons())
+        self._stop_timer.start(5000)  # 3 second safety timeout
     
         if not hasattr(self, 'process_worker') or self.process_worker is None:
             self.output_console.appendPlainText("\n=== NO PROCESS RUNNING ===")
-            self._reenable_stop_button(force_run=True)  # Immediately switch to RUN
+            self._force_reenable_buttons()
             return
     
         # Check if process is actually running
@@ -3230,7 +3465,7 @@ subprocess.call(["/bin/sh", "-i"])
             if hasattr(self.process_worker, 'process') and self.process_worker.process:
                 if self.process_worker.process.poll() is not None:
                     self.output_console.appendPlainText("\n=== PROCESS ALREADY FINISHED ===")
-                    self._reenable_stop_button(force_run=True)  # Immediately switch to RUN
+                    self._force_reenable_buttons()
                     self.cleanup_after_process()
                     return
         except:
@@ -3240,28 +3475,28 @@ subprocess.call(["/bin/sh", "-i"])
         try:
             self.process_worker.stop()
             self.output_console.appendPlainText("\n=== PROCESS STOPPED BY USER ===")
-            # Process will signal finished, which will trigger cleanup
-            # The button will be re-enabled in cleanup_after_process()
         except Exception as e:
             self.output_console.appendPlainText(f"\n=== ERROR STOPPING PROCESS: {str(e)} ===")
-            self._reenable_stop_button(force_run=True)  # Re-enable on error
-            
-    def _reenable_stop_button(self):
-        """Internal method to re-enable stop button"""
-        # Cancel the stop timer
+            self._force_reenable_buttons()
+
+    def _force_reenable_buttons(self):
+        """Force re-enable all stop buttons"""
+        # Cancel timer
         if hasattr(self, '_stop_timer') and self._stop_timer.isActive():
             self._stop_timer.stop()
     
-        # Re-enable button
+        # Re-enable run action
         if hasattr(self, 'run_action'):
             self.run_action.setEnabled(True)
-            # Update text based on current state
             if hasattr(self, 'process_worker') and self.process_worker is not None:
-                # Still have a process worker, show STOP
-                self.run_action.setText("⏹ STOP")
+                self.run_action.setText("■ STOP")
             else:
-                # No process worker, show RUN
                 self.run_action.setText("▶ RUN")
+    
+        # Re-enable stop button if it exists
+        if hasattr(self, 'stop_button') and self.stop_button:
+            self.stop_button.setEnabled(True)
+            self.stop_button.setText("STOP EXECUTION")
             
     def cleanup_thread(self):
         """Clean up the thread object - called by thread.finished signal"""
